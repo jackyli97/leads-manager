@@ -52,7 +52,6 @@ class LeadBase(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    resume_url: str = Field(min_length=1, max_length=500)
 
     @field_validator("first_name", "last_name")
     @classmethod
@@ -74,6 +73,7 @@ class LeadCreate(LeadBase):
 
 class LeadRead(LeadBase):
     id: int
+    resume_url: str
     assigned_attorney_id: int | None
     status: LeadStatus
 

@@ -2,6 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, BriefcaseBusiness, CheckCircle2, LogOut, Scale } from "lucide-react";
+import Link from "next/link";
+
+import { getErrorMessage } from "@/lib/api";
 
 type Mode = "login" | "signup";
 
@@ -13,16 +16,7 @@ type User = {
   role: "attorney";
 };
 
-type ApiError = { detail?: string | Array<{ msg: string }> };
-
 const TOKEN_KEY = "counsel_desk_access_token";
-
-async function getErrorMessage(response: Response) {
-  const data = (await response.json().catch(() => ({}))) as ApiError;
-  if (typeof data.detail === "string") return data.detail;
-  if (Array.isArray(data.detail)) return data.detail[0]?.msg ?? "Please check your details.";
-  return "Something went wrong. Please try again.";
-}
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("login");
@@ -228,6 +222,10 @@ export default function Home() {
           </form>
 
           <p className="form-note">Accounts are currently available to attorneys only.</p>
+          <div className="client-entry">
+            <span>Looking for legal assistance?</span>
+            <Link href="/intake">Submit an inquiry <ArrowRight size={15} /></Link>
+          </div>
         </div>
       </section>
     </main>
