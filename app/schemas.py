@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models import UserRole
+from app.models import LeadStatus, UserRole
 
 
 class UserBase(BaseModel):
@@ -46,3 +46,35 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class LeadBase(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    resume_url: str = Field(min_length=1, max_length=500)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).lower()
+
+
+class LeadCreate(LeadBase):
+    pass
+
+
+class LeadRead(LeadBase):
+    id: int
+    assigned_attorney_id: int | None
+    status: LeadStatus
+
+    model_config = {"from_attributes": True}
