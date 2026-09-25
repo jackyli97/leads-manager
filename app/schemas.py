@@ -71,6 +71,10 @@ class LeadCreate(LeadBase):
     pass
 
 
+class LeadStatusUpdate(BaseModel):
+    status: LeadStatus
+
+
 class LeadRead(LeadBase):
     id: int
     resume_url: str

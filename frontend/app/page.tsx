@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowRight, BriefcaseBusiness, CheckCircle2, LogOut, Scale } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, CheckCircle2, FileText, LogOut, RotateCcw, Scale } from "lucide-react";
 import Link from "next/link";
 
 import { getErrorMessage } from "@/lib/api";
@@ -16,14 +16,42 @@ type User = {
   role: "attorney";
 };
 
+type Lead = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  resume_url: string;
+  assigned_attorney_id: number | null;
+  status: "pending" | "reached_out";
+};
+
 const TOKEN_KEY = "counsel_desk_access_token";
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("login");
   const [user, setUser] = useState<User | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [portalError, setPortalError] = useState("");
+  const [updatingLeadId, setUpdatingLeadId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  async function loadPortal(token: string) {
+    const headers = { Authorization: `Bearer ${token}` };
+    const profileResponse = await fetch("/api/auth/me", { headers });
+    if (!profileResponse.ok) throw new Error("Session expired");
+    setUser((await profileResponse.json()) as User);
+
+    const leadsResponse = await fetch("/api/leads", { headers });
+    if (!leadsResponse.ok) {
+      setPortalError(await getErrorMessage(leadsResponse));
+      return;
+    }
+    setLeads((await leadsResponse.json()) as Lead[]);
+    setPortalError("");
+  }
 
   useEffect(() => {
     async function restoreSession() {
@@ -34,11 +62,7 @@ export default function Home() {
       }
 
       try {
-        const response = await fetch("/api/auth/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!response.ok) throw new Error("Session expired");
-        setUser((await response.json()) as User);
+        await loadPortal(token);
       } catch {
         window.localStorage.removeItem(TOKEN_KEY);
       } finally {
@@ -88,11 +112,7 @@ export default function Home() {
       const { access_token } = (await loginResponse.json()) as { access_token: string };
       window.localStorage.setItem(TOKEN_KEY, access_token);
 
-      const meResponse = await fetch("/api/auth/me", {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
-      if (!meResponse.ok) throw new Error(await getErrorMessage(meResponse));
-      setUser((await meResponse.json()) as User);
+      await loadPortal(access_token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Something went wrong.");
     } finally {
@@ -103,7 +123,42 @@ export default function Home() {
   function logout() {
     window.localStorage.removeItem(TOKEN_KEY);
     setUser(null);
+    setLeads([]);
+    setPortalError("");
     setMode("login");
+  }
+
+  async function updateLeadStatus(leadId: number, status: Lead["status"]) {
+    const token = window.localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      logout();
+      return;
+    }
+
+    setUpdatingLeadId(leadId);
+    setPortalError("");
+    try {
+      const response = await fetch(`/api/leads/${leadId}/status`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error(await getErrorMessage(response));
+
+      const updatedLead = (await response.json()) as Lead;
+      setLeads((currentLeads) =>
+        currentLeads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      );
+    } catch (caughtError) {
+      setPortalError(
+        caughtError instanceof Error ? caughtError.message : "Could not update the lead.",
+      );
+    } finally {
+      setUpdatingLeadId(null);
+    }
   }
 
   if (loading) {
@@ -126,17 +181,89 @@ export default function Home() {
         <section className="portal-content">
           <div className="portal-kicker"><CheckCircle2 size={18} /> Signed in</div>
           <p className="eyebrow">Attorney portal</p>
-          <h1>Welcome, {user.first_name} {user.last_name}</h1>
+          <h1>Lead pipeline</h1>
           <p className="portal-copy">
-            Your workspace is ready. New prospective clients and case activity will appear here.
+            Welcome, {user.first_name} {user.last_name}. Review prospective clients and their submitted materials.
           </p>
-          <div className="empty-state">
-            <BriefcaseBusiness size={24} />
-            <div>
-              <strong>No active leads yet</strong>
-              <span>Submitted leads will be organized in this workspace.</span>
+
+          <section className="leads-section" aria-labelledby="leads-heading">
+            <div className="leads-heading">
+              <div>
+                <h2 id="leads-heading">Prospective clients</h2>
+                <span>{leads.length} {leads.length === 1 ? "lead" : "leads"}</span>
+              </div>
             </div>
-          </div>
+
+            {portalError ? (
+              <p className="portal-error" role="alert">{portalError}</p>
+            ) : leads.length === 0 ? (
+              <div className="empty-state">
+                <BriefcaseBusiness size={24} />
+                <div>
+                  <strong>No active leads yet</strong>
+                  <span>Submitted leads will be organized in this workspace.</span>
+                </div>
+              </div>
+            ) : (
+              <div className="leads-table-wrap">
+                <table className="leads-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Prospect</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Assignment</th>
+                      <th scope="col"><span className="sr-only">Resume</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leads.map((lead) => (
+                      <tr key={lead.id}>
+                        <td>
+                          <strong>{lead.first_name} {lead.last_name}</strong>
+                          <a href={`mailto:${lead.email}`}>{lead.email}</a>
+                        </td>
+                        <td>
+                          <div className="status-cell">
+                            <span className={`status-badge status-${lead.status}`}>{lead.status.replace("_", " ")}</span>
+                            <button
+                              className="status-action"
+                              type="button"
+                              disabled={updatingLeadId === lead.id}
+                              onClick={() => updateLeadStatus(
+                                lead.id,
+                                lead.status === "pending" ? "reached_out" : "pending",
+                              )}
+                            >
+                              {lead.status === "pending"
+                                ? <CheckCircle2 size={15} />
+                                : <RotateCcw size={15} />}
+                              {updatingLeadId === lead.id
+                                ? "Saving..."
+                                : lead.status === "pending"
+                                  ? "Mark reached out"
+                                  : "Move to pending"}
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          {lead.assigned_attorney_id === user.id
+                            ? "Assigned to you"
+                            : lead.assigned_attorney_id
+                              ? `Attorney #${lead.assigned_attorney_id}`
+                              : "Unassigned"}
+                        </td>
+                        <td>
+                          <a className="resume-link" href={lead.resume_url} target="_blank" rel="noreferrer">
+                            <FileText size={17} /> Resume
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </section>
       </main>
     );
