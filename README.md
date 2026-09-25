@@ -51,6 +51,8 @@
 		- enqueued(added to queue)
 		- sent
 		- failed
+    - lead_id (reference to leads table)
+    - unique constraint on type and lead_id
 
 ## Required technologies
 - SQLite for database

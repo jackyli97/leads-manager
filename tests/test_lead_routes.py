@@ -1,13 +1,21 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import create_access_token
 from app.database import Base, get_db
 from app.main import app
-from app.models import Lead, LeadStatus, User
+from app.models import (
+    Lead,
+    LeadStatus,
+    Notification,
+    NotificationStatus,
+    NotificationType,
+    User,
+)
+from app.routes import lead_routes
 from app.services import storage
 
 PDF_CONTENT = b"%PDF-1.4\n% test resume\n%%EOF"
@@ -86,6 +94,27 @@ def test_create_lead(client: TestClient, db_session: Session, upload_dir):
     lead = db_session.scalar(select(Lead))
     assert lead is not None
     assert lead.assigned_attorney_id is None
+    notifications = list(
+        db_session.scalars(select(Notification).order_by(Notification.type)).all()
+    )
+    assert {notification.type for notification in notifications} == {
+        NotificationType.LEAD_CONFIRMATION,
+        NotificationType.NOTIFY_ATTORNEY,
+    }
+    assert all(
+        notification.status is NotificationStatus.PENDING
+        for notification in notifications
+    )
+    assert next(
+        notification
+        for notification in notifications
+        if notification.type is NotificationType.LEAD_CONFIRMATION
+    ).recipient_email == "grace@example.com"
+    assert next(
+        notification
+        for notification in notifications
+        if notification.type is NotificationType.NOTIFY_ATTORNEY
+    ).recipient_email is None
 
 
 def test_create_lead_assigns_available_attorney(
@@ -104,6 +133,10 @@ def test_create_lead_assigns_available_attorney(
 
     assert response.status_code == 201
     assert response.json()["assigned_attorney_id"] == attorney.id
+    attorney_notification = db_session.scalar(
+        select(Notification).where(Notification.type == NotificationType.NOTIFY_ATTORNEY)
+    )
+    assert attorney_notification.recipient_email == attorney.email
 
 
 def test_create_lead_rejects_duplicate_email(client: TestClient, upload_dir):
@@ -114,6 +147,37 @@ def test_create_lead_rejects_duplicate_email(client: TestClient, upload_dir):
     assert response.status_code == 409
     assert response.json() == {"detail": "A lead with this email already exists"}
     assert len(list(upload_dir.glob("*.pdf"))) == 1
+
+
+def test_create_lead_rolls_back_when_notification_creation_fails(
+    client: TestClient, db_session: Session, upload_dir, monkeypatch
+):
+    def duplicate_notifications(lead: Lead, assigned_attorney: User | None):
+        return [
+            Notification(
+                lead=lead,
+                type=NotificationType.LEAD_CONFIRMATION,
+                recipient_email=lead.email,
+            ),
+            Notification(
+                lead=lead,
+                type=NotificationType.LEAD_CONFIRMATION,
+                recipient_email=lead.email,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        lead_routes,
+        "create_lead_notifications",
+        duplicate_notifications,
+    )
+
+    response = submit_lead(client)
+
+    assert response.status_code == 500
+    assert db_session.scalar(select(func.count()).select_from(Lead)) == 0
+    assert db_session.scalar(select(func.count()).select_from(Notification)) == 0
+    assert list(upload_dir.iterdir()) == []
 
 
 def test_create_lead_requires_resume_file(client: TestClient):
