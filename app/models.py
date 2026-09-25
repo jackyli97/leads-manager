@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -13,6 +13,18 @@ class UserRole(StrEnum):
 class LeadStatus(StrEnum):
     PENDING = "pending"
     REACHED_OUT = "reached_out"
+
+
+class NotificationType(StrEnum):
+    LEAD_CONFIRMATION = "lead_confirmation"
+    NOTIFY_ATTORNEY = "notify_attorney"
+
+
+class NotificationStatus(StrEnum):
+    PENDING = "pending"
+    ENQUEUED = "enqueued"
+    SENT = "sent"
+    FAILED = "failed"
 
 
 class User(Base):
@@ -55,3 +67,38 @@ class Lead(Base):
     )
 
     assigned_attorney: Mapped[User | None] = relationship(back_populates="assigned_leads")
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="lead",
+        cascade="all, delete-orphan",
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("lead_id", "type", name="uq_notifications_lead_id_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False, index=True)
+    type: Mapped[NotificationType] = mapped_column(
+        Enum(
+            NotificationType,
+            name="notification_type",
+            values_callable=lambda types: [notification_type.value for notification_type in types],
+        ),
+        nullable=False,
+    )
+    recipient_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[NotificationStatus] = mapped_column(
+        Enum(
+            NotificationStatus,
+            name="notification_status",
+            values_callable=lambda statuses: [status.value for status in statuses],
+        ),
+        nullable=False,
+        default=NotificationStatus.PENDING,
+        server_default=NotificationStatus.PENDING.value,
+    )
+
+    lead: Mapped[Lead] = relationship(back_populates="notifications")

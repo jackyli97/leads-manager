@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import Lead, User
 from app.schemas import LeadCreate, LeadRead, LeadStatusUpdate
 from app.services.assignment_service import select_attorney_id
+from app.services.notification_service import create_lead_notifications
 from app.services.storage import delete_resume, save_resume
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -63,24 +64,43 @@ async def create_lead(
     resume: Annotated[UploadFile, File()],
     db: DatabaseSession,
 ) -> Lead:
+    existing_lead_id = db.scalar(select(Lead.id).where(Lead.email == str(lead_data.email)))
+    if existing_lead_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A lead with this email already exists",
+        )
+
     resume_url = await save_resume(resume)
+    assigned_attorney_id = select_attorney_id(db)
+    assigned_attorney = (
+        db.get(User, assigned_attorney_id) if assigned_attorney_id is not None else None
+    )
     lead = Lead(
         first_name=lead_data.first_name,
         last_name=lead_data.last_name,
         email=str(lead_data.email),
         resume_url=resume_url,
-        assigned_attorney_id=select_attorney_id(db),
+        assigned_attorney_id=assigned_attorney_id,
     )
     db.add(lead)
+    db.add_all(create_lead_notifications(lead, assigned_attorney))
 
     try:
         db.commit()
-    except IntegrityError:
+    except SQLAlchemyError as error:
         db.rollback()
         await delete_resume(resume_url)
+        if isinstance(error, IntegrityError) and db.scalar(
+            select(Lead.id).where(Lead.email == str(lead_data.email))
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A lead with this email already exists",
+            ) from None
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A lead with this email already exists",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not create lead notifications",
         ) from None
 
     db.refresh(lead)
