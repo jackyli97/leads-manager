@@ -73,3 +73,7 @@
 - Using SQLite for local development and ease of setup, but in production environment would default to a client-server DB like Postgres
 - Storing PDFs on disk for minimal setup, in production environment, would use S3
 - In production environment would use a persistent queue solution like SQS, but for time constraint purposes, using asyncio.Queue here. This mimics enqueue, worker execute, clean up flow, but will not gracefully handle queue crashes
+
+## Loom
+- https://www.loom.com/share/8555524e19064a08a2bd17361c30de16
+- Note, the email that is shown in Resend that our email was sent to shows "delivered@resend.dev", this is because in local development, there are only certain email addresses using resend.dev domain defined in their docs(https://resend.com/docs/dashboard/emails/send-test-emails) that we can send to, so I hard-coded this in the backend when calling the send email api
