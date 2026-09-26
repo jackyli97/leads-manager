@@ -61,6 +61,9 @@
 - Queue is built on top of sqlite3 so it is durable and support appends, reappends, and removal following completion
 - Another worker runs in the background that picks tasks from the queue and executes the task(sending email). On failures, we re-append notifiation to the queue. A future improvement can be to record number of overall failures and per notificaiton failure - and halt execution of worker if it seems like email provider is down, or to stop appending notification to queue after x amount of failures
 
+## Design Choice for assigning attorney to lead
+- Attorney is assigned to lead at the time of lead object creation. Attorney is chosen by querying number of leads each attorney has and using attorney with the least amount of assigned leads. This uses a round robin approach. Considered using a priority queue that continously pops from top of queue to get the least recently used attorney and then appending them to the back, but went with this to avoid adding another piece of architecture to support this flow that isn't too critical, as worse case with this design an attorney might be assigned multiple leads if two leads submitted right at the same time, and the same attorney is returned.
+
 ## Required technologies
 - SQLite for database
 - Resend for email service
